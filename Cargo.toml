@@ -1,0 +1,22 @@
+[package]
+name = "tuisteroids"
+version = "0.1.0"
+edition = "2021"
+
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(tarpaulin_include)'] }
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+rand = "0.8"
+
+[dev-dependencies]
+
+[[bin]]
+name = "tuisteroids"
+path = "src/main.rs"
+
+[lib]
+name = "tuisteroids"
+path = "src/lib.rs"
