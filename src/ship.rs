@@ -81,7 +81,7 @@ impl Ship {
     pub fn thrust(&mut self, dt: f64) {
         let direction = Vec2::from_angle(self.rotation);
         let acceleration = direction.scale(THRUST_ACCELERATION * dt);
-        self.velocity = self.velocity.add(acceleration);
+        self.velocity = self.velocity + acceleration;
 
         // Clamp to max speed
         let speed = self.velocity.magnitude();

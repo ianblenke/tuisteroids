@@ -1,10 +1,10 @@
-pub mod physics;
-pub mod collision;
-pub mod input;
-pub mod ship;
 pub mod asteroids;
-pub mod bullets;
-pub mod renderer;
-pub mod demo_ai;
 pub mod audio;
+pub mod bullets;
+pub mod collision;
+pub mod demo_ai;
 pub mod game;
+pub mod input;
+pub mod physics;
+pub mod renderer;
+pub mod ship;

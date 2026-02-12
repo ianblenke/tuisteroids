@@ -85,6 +85,20 @@ src/
 
 This project uses [OpenSpec](https://github.com/openspec) for specification management and enforces a strict spec-first TDD workflow. See [CLAUDE.md](CLAUDE.md) for details.
 
+### Git Hooks
+
+A pre-commit hook enforces formatting, linting, tests, and 100% code coverage on every commit. To install:
+
+```bash
+bash hooks/install.sh
+```
+
+Requires [cargo-tarpaulin](https://github.com/xd009642/tarpaulin):
+
+```bash
+cargo install cargo-tarpaulin
+```
+
 ## License
 
 See [LICENSE](LICENSE) for details.

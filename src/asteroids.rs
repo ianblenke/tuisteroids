@@ -49,12 +49,7 @@ pub struct Asteroid {
 
 impl Asteroid {
     /// Create a new asteroid with random shape.
-    pub fn new<R: Rng>(
-        position: Vec2,
-        velocity: Vec2,
-        size: AsteroidSize,
-        rng: &mut R,
-    ) -> Self {
+    pub fn new<R: Rng>(position: Vec2, velocity: Vec2, size: AsteroidSize, rng: &mut R) -> Self {
         let radius = size.radius();
         let num_vertices = rng.gen_range(8..=12);
         let angular_velocity = rng.gen_range(-1.0..1.0);
@@ -160,18 +155,21 @@ pub fn spawn_wave<R: Rng>(
     let mut asteroids = Vec::with_capacity(count as usize);
 
     for _ in 0..count {
-        let mut pos;
-        loop {
-            pos = Vec2::new(
+        let pos = loop {
+            let candidate = Vec2::new(
                 rng.gen_range(0.0..world_width),
                 rng.gen_range(0.0..world_height),
             );
-            let dx = (pos.x - ship_position.x).abs().min(world_width - (pos.x - ship_position.x).abs());
-            let dy = (pos.y - ship_position.y).abs().min(world_height - (pos.y - ship_position.y).abs());
+            let dx = (candidate.x - ship_position.x)
+                .abs()
+                .min(world_width - (candidate.x - ship_position.x).abs());
+            let dy = (candidate.y - ship_position.y)
+                .abs()
+                .min(world_height - (candidate.y - ship_position.y).abs());
             if (dx * dx + dy * dy).sqrt() >= min_distance {
-                break;
+                break candidate;
             }
-        }
+        };
 
         let speed = rng.gen_range(20.0..80.0);
         let angle = rng.gen_range(0.0..(2.0 * PI));
@@ -199,8 +197,8 @@ pub fn full_destroy_score() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     fn test_rng() -> StdRng {
         StdRng::seed_from_u64(42)
@@ -235,7 +233,12 @@ mod tests {
     #[test]
     fn test_asteroid_has_vertices() {
         let mut rng = test_rng();
-        let a = Asteroid::new(Vec2::new(0.0, 0.0), Vec2::new(0.0, 0.0), AsteroidSize::Large, &mut rng);
+        let a = Asteroid::new(
+            Vec2::new(0.0, 0.0),
+            Vec2::new(0.0, 0.0),
+            AsteroidSize::Large,
+            &mut rng,
+        );
         assert!(a.vertices.len() >= 8 && a.vertices.len() <= 12);
     }
 
@@ -244,12 +247,24 @@ mod tests {
     fn test_asteroid_vertices_vary() {
         let mut rng1 = StdRng::seed_from_u64(1);
         let mut rng2 = StdRng::seed_from_u64(2);
-        let a1 = Asteroid::new(Vec2::new(0.0, 0.0), Vec2::new(0.0, 0.0), AsteroidSize::Large, &mut rng1);
-        let a2 = Asteroid::new(Vec2::new(0.0, 0.0), Vec2::new(0.0, 0.0), AsteroidSize::Large, &mut rng2);
+        let a1 = Asteroid::new(
+            Vec2::new(0.0, 0.0),
+            Vec2::new(0.0, 0.0),
+            AsteroidSize::Large,
+            &mut rng1,
+        );
+        let a2 = Asteroid::new(
+            Vec2::new(0.0, 0.0),
+            Vec2::new(0.0, 0.0),
+            AsteroidSize::Large,
+            &mut rng2,
+        );
         // At least one vertex should differ
-        let differs = a1.vertices.iter().zip(a2.vertices.iter()).any(|(v1, v2)| {
-            (v1.x - v2.x).abs() > 0.001 || (v1.y - v2.y).abs() > 0.001
-        });
+        let differs = a1
+            .vertices
+            .iter()
+            .zip(a2.vertices.iter())
+            .any(|(v1, v2)| (v1.x - v2.x).abs() > 0.001 || (v1.y - v2.y).abs() > 0.001);
         assert!(differs);
     }
 
@@ -258,7 +273,12 @@ mod tests {
     fn test_vertices_within_radius_bounds() {
         let mut rng = test_rng();
         let radius = AsteroidSize::Large.radius();
-        let a = Asteroid::new(Vec2::new(0.0, 0.0), Vec2::new(0.0, 0.0), AsteroidSize::Large, &mut rng);
+        let a = Asteroid::new(
+            Vec2::new(0.0, 0.0),
+            Vec2::new(0.0, 0.0),
+            AsteroidSize::Large,
+            &mut rng,
+        );
         for v in &a.vertices {
             let dist = v.magnitude();
             assert!(dist >= 0.5 * radius - 0.01, "vertex too close: {}", dist);
@@ -406,8 +426,12 @@ mod tests {
         let ship_pos = Vec2::new(400.0, 300.0);
         let asteroids = spawn_wave(1, ship_pos, 150.0, 800.0, 600.0, &mut rng);
         for a in &asteroids {
-            let dx = (a.position.x - ship_pos.x).abs().min(800.0 - (a.position.x - ship_pos.x).abs());
-            let dy = (a.position.y - ship_pos.y).abs().min(600.0 - (a.position.y - ship_pos.y).abs());
+            let dx = (a.position.x - ship_pos.x)
+                .abs()
+                .min(800.0 - (a.position.x - ship_pos.x).abs());
+            let dy = (a.position.y - ship_pos.y)
+                .abs()
+                .min(600.0 - (a.position.y - ship_pos.y).abs());
             let dist = (dx * dx + dy * dy).sqrt();
             assert!(dist >= 150.0, "asteroid spawned too close: {}", dist);
         }
@@ -452,7 +476,11 @@ mod tests {
     // Additional coverage: world_vertices
     #[test]
     fn test_world_vertices_transform() {
-        let verts = vec![Vec2::new(10.0, 0.0), Vec2::new(-5.0, 5.0), Vec2::new(-5.0, -5.0)];
+        let verts = vec![
+            Vec2::new(10.0, 0.0),
+            Vec2::new(-5.0, 5.0),
+            Vec2::new(-5.0, -5.0),
+        ];
         let a = Asteroid::new_with_shape(
             Vec2::new(100.0, 200.0),
             Vec2::new(0.0, 0.0),

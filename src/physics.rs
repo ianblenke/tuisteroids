@@ -1,6 +1,7 @@
 // Physics capability: Vec2, motion integration, toroidal wrapping, angular rotation
 
 use std::f64::consts::PI;
+use std::ops::{Add, Sub};
 
 /// A 2D vector with f64 components.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -12,14 +13,6 @@ pub struct Vec2 {
 impl Vec2 {
     pub fn new(x: f64, y: f64) -> Self {
         Self { x, y }
-    }
-
-    pub fn add(self, other: Vec2) -> Vec2 {
-        Vec2::new(self.x + other.x, self.y + other.y)
-    }
-
-    pub fn sub(self, other: Vec2) -> Vec2 {
-        Vec2::new(self.x - other.x, self.y - other.y)
     }
 
     pub fn scale(self, scalar: f64) -> Vec2 {
@@ -48,9 +41,25 @@ impl Vec2 {
     }
 }
 
+impl Add for Vec2 {
+    type Output = Vec2;
+
+    fn add(self, other: Vec2) -> Vec2 {
+        Vec2::new(self.x + other.x, self.y + other.y)
+    }
+}
+
+impl Sub for Vec2 {
+    type Output = Vec2;
+
+    fn sub(self, other: Vec2) -> Vec2 {
+        Vec2::new(self.x - other.x, self.y - other.y)
+    }
+}
+
 /// Update position using Euler integration: position = position + velocity * dt
 pub fn integrate_motion(position: Vec2, velocity: Vec2, dt: f64) -> Vec2 {
-    position.add(velocity.scale(dt))
+    position + velocity.scale(dt)
 }
 
 /// Apply drag to velocity: velocity = velocity * drag_factor
@@ -94,7 +103,7 @@ mod tests {
     fn test_vector_addition() {
         let a = Vec2::new(3.0, 4.0);
         let b = Vec2::new(1.0, 2.0);
-        let result = a.add(b);
+        let result = a + b;
         assert_eq!(result, Vec2::new(4.0, 6.0));
     }
 
@@ -103,7 +112,7 @@ mod tests {
     fn test_vector_subtraction() {
         let a = Vec2::new(3.0, 4.0);
         let b = Vec2::new(1.0, 2.0);
-        let result = a.sub(b);
+        let result = a - b;
         assert_eq!(result, Vec2::new(2.0, 2.0));
     }
 

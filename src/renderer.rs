@@ -115,17 +115,11 @@ impl BrailleBuffer {
                 break;
             }
             let e2 = 2 * err;
-            if e2 >= dy {
-                if x == x1 {
-                    break;
-                }
+            if e2 >= dy && x != x1 {
                 err += dy;
                 x += sx;
             }
-            if e2 <= dx {
-                if y == y1 {
-                    break;
-                }
+            if e2 <= dx && y != y1 {
                 err += dx;
                 y += sy;
             }
@@ -188,7 +182,7 @@ pub fn game_over_overlay(score: u32) -> ScreenOverlay {
 /// Determine if an invulnerable ship should be visible this frame (blink effect).
 /// Blinks at ~10Hz (every 6 frames at 60 FPS).
 pub fn ship_blink_visible(frame_count: u64) -> bool {
-    (frame_count / 6) % 2 == 0
+    (frame_count / 6).is_multiple_of(2)
 }
 
 /// Generate thrust flame vertices behind the ship.
@@ -378,7 +372,7 @@ mod tests {
     fn test_buffer_dimensions() {
         let buf = BrailleBuffer::new(80, 24);
         assert_eq!(buf.dot_width(), 160); // 80 * 2
-        assert_eq!(buf.dot_height(), 96);  // 24 * 4
+        assert_eq!(buf.dot_height(), 96); // 24 * 4
     }
 
     // === Requirement: HUD Display ===
@@ -386,7 +380,10 @@ mod tests {
     // Scenario: Score displays at top-left
     #[test]
     fn test_hud_score() {
-        let hud = HudInfo { score: 1250, lives: 3 };
+        let hud = HudInfo {
+            score: 1250,
+            lives: 3,
+        };
         assert_eq!(hud.score, 1250);
     }
 
@@ -400,7 +397,10 @@ mod tests {
     // Scenario: Score updates in real time
     #[test]
     fn test_hud_score_update() {
-        let mut hud = HudInfo { score: 500, lives: 3 };
+        let mut hud = HudInfo {
+            score: 500,
+            lives: 3,
+        };
         hud.score = 600;
         assert_eq!(hud.score, 600);
     }
@@ -524,5 +524,33 @@ mod tests {
         buf.set_dot(0, 1000);
         // Nothing should be set
         assert!(buf.cells.iter().all(|&c| c == 0));
+    }
+
+    // Scenario: draw_polygon with fewer than 2 vertices returns early
+    #[test]
+    fn test_empty_polygon() {
+        let mut buf = BrailleBuffer::new(10, 10);
+        buf.draw_polygon(&[], 800.0, 600.0);
+        buf.draw_polygon(&[Vec2::new(0.0, 0.0)], 800.0, 600.0);
+        // No dots should be set
+        assert!(buf.cells.iter().all(|&c| c == 0));
+    }
+
+    // Scenario: Nearly-vertical line renders correctly
+    #[test]
+    fn test_nearly_vertical_line() {
+        let mut buf = BrailleBuffer::new(10, 10);
+        buf.draw_line(1, 1, 2, 11);
+        let has_dots = buf.cells.iter().any(|&c| c != 0);
+        assert!(has_dots);
+    }
+
+    // Scenario: Nearly-horizontal line renders correctly
+    #[test]
+    fn test_nearly_horizontal_line() {
+        let mut buf = BrailleBuffer::new(10, 10);
+        buf.draw_line(1, 1, 11, 2);
+        let has_dots = buf.cells.iter().any(|&c| c != 0);
+        assert!(has_dots);
     }
 }

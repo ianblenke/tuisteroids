@@ -42,6 +42,12 @@ pub struct BulletPool {
     pub bullets: Vec<Bullet>,
 }
 
+impl Default for BulletPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BulletPool {
     pub fn new() -> Self {
         Self {
@@ -220,5 +226,12 @@ mod tests {
     #[test]
     fn test_bullet_radius() {
         assert!(approx_eq(BULLET_RADIUS, 2.0));
+    }
+
+    // Scenario: BulletPool implements Default
+    #[test]
+    fn test_bullet_pool_default() {
+        let pool = BulletPool::default();
+        assert_eq!(pool.active_count(), 0);
     }
 }

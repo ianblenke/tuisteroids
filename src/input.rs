@@ -55,9 +55,7 @@ pub struct FireEdgeDetector {
 
 impl FireEdgeDetector {
     pub fn new() -> Self {
-        Self {
-            was_pressed: false,
-        }
+        Self { was_pressed: false }
     }
 
     /// Returns true only on the rising edge (newly pressed this frame).

@@ -57,6 +57,7 @@ pub enum ShipCollisionResult {
 }
 
 /// Check ship-asteroid collision and determine result.
+#[allow(clippy::too_many_arguments)]
 pub fn check_ship_asteroid_collision(
     ship_pos: Vec2,
     ship_radius: f64,
@@ -236,9 +237,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            ShipCollisionResult::ShipDestroyed {
-                lives_remaining: 2
-            }
+            ShipCollisionResult::ShipDestroyed { lives_remaining: 2 }
         );
     }
 
@@ -377,12 +376,7 @@ mod tests {
     // Scenario: Both axes wrap
     #[test]
     fn test_toroidal_direction_both_axes_wrap() {
-        let dir = toroidal_direction(
-            Vec2::new(10.0, 10.0),
-            Vec2::new(790.0, 590.0),
-            800.0,
-            600.0,
-        );
+        let dir = toroidal_direction(Vec2::new(10.0, 10.0), Vec2::new(790.0, 590.0), 800.0, 600.0);
         assert!(approx_eq(dir.x, -20.0));
         assert!(approx_eq(dir.y, -20.0));
     }
@@ -391,12 +385,7 @@ mod tests {
     #[test]
     fn test_toroidal_direction_negative_wrap() {
         // from=(790,590) to=(10,10): dx=10-790=-780 < -400 → dx+=800=20, dy=10-590=-580 < -300 → dy+=600=20
-        let dir = toroidal_direction(
-            Vec2::new(790.0, 590.0),
-            Vec2::new(10.0, 10.0),
-            800.0,
-            600.0,
-        );
+        let dir = toroidal_direction(Vec2::new(790.0, 590.0), Vec2::new(10.0, 10.0), 800.0, 600.0);
         assert!(approx_eq(dir.x, 20.0));
         assert!(approx_eq(dir.y, 20.0));
     }

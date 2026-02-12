@@ -25,19 +25,17 @@ pub fn generate_demo_input(
     let nearest = asteroids
         .iter()
         .min_by(|a, b| {
-            let da = collision::toroidal_distance(ship.position, a.position, world_width, world_height);
-            let db = collision::toroidal_distance(ship.position, b.position, world_width, world_height);
+            let da =
+                collision::toroidal_distance(ship.position, a.position, world_width, world_height);
+            let db =
+                collision::toroidal_distance(ship.position, b.position, world_width, world_height);
             da.partial_cmp(&db).unwrap()
         })
         .unwrap();
 
     // Compute direction to nearest asteroid via shortest toroidal path
-    let direction = collision::toroidal_direction(
-        ship.position,
-        nearest.position,
-        world_width,
-        world_height,
-    );
+    let direction =
+        collision::toroidal_direction(ship.position, nearest.position, world_width, world_height);
     let target_angle = direction.y.atan2(direction.x);
 
     // Signed angle difference, normalized to [-PI, PI]

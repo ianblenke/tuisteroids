@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=== Pre-commit hook ==="
+
+echo ""
+echo "--- Checking formatting (cargo fmt) ---"
+cargo fmt -- --check
+echo "Formatting: OK"
+
+echo ""
+echo "--- Running linter (cargo clippy) ---"
+cargo clippy --lib --bins -- -D warnings
+echo "Linting: OK"
+
+echo ""
+echo "--- Running tests (cargo test) ---"
+cargo test --lib
+echo "Tests: OK"
+
+echo ""
+echo "--- Checking code coverage (cargo tarpaulin) ---"
+COVERAGE_OUTPUT=$(cargo tarpaulin --lib --timeout 120 --skip-clean 2>&1)
+echo "$COVERAGE_OUTPUT" | tail -5
+
+COVERAGE_PCT=$(echo "$COVERAGE_OUTPUT" | grep -oE '[0-9]+\.[0-9]+% coverage' | grep -oE '[0-9]+\.[0-9]+')
+
+if [ -z "$COVERAGE_PCT" ]; then
+    echo "ERROR: Could not parse coverage percentage from tarpaulin output."
+    exit 1
+fi
+
+# Compare using awk for floating point
+PASS=$(echo "$COVERAGE_PCT" | awk '{if ($1 >= 100.00) print 1; else print 0}')
+
+if [ "$PASS" -ne 1 ]; then
+    echo ""
+    echo "ERROR: Code coverage is ${COVERAGE_PCT}%, required 100%."
+    echo "Commit aborted."
+    exit 1
+fi
+
+echo "Coverage: ${COVERAGE_PCT}% - OK"
+
+echo ""
+echo "=== All checks passed ==="
