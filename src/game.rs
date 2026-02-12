@@ -3,6 +3,7 @@
 use crate::asteroids::{self, Asteroid, AsteroidSize};
 use crate::bullets::{self, BulletPool};
 use crate::collision;
+use crate::demo_ai;
 use crate::input::{self, Action, FireEdgeDetector, InputState};
 use crate::physics;
 use crate::renderer::{self, BrailleBuffer};
@@ -280,6 +281,7 @@ impl PlayingState {
 pub struct Game {
     pub state: GameState,
     pub playing: Option<PlayingState>,
+    pub demo: Option<PlayingState>,
     pub final_score: u32,
     pub world_width: f64,
     pub world_height: f64,
@@ -290,6 +292,7 @@ impl Game {
         Self {
             state: GameState::Menu,
             playing: None,
+            demo: Some(PlayingState::new(world_width, world_height)),
             final_score: 0,
             world_width,
             world_height,
@@ -306,6 +309,7 @@ impl Game {
                 // Any other key starts the game
                 self.state = GameState::Playing;
                 self.playing = Some(PlayingState::new(self.world_width, self.world_height));
+                self.demo = None;
                 false
             }
             GameState::GameOver => {
@@ -313,6 +317,7 @@ impl Game {
                     return true;
                 }
                 self.state = GameState::Menu;
+                self.demo = Some(PlayingState::new(self.world_width, self.world_height));
                 false
             }
             GameState::Playing => false, // handled in update loop
@@ -326,6 +331,11 @@ impl Game {
         }
         self.state = GameState::GameOver;
         self.playing = None;
+    }
+
+    /// Start a new demo (attract mode) game.
+    pub fn start_demo(&mut self) {
+        self.demo = Some(PlayingState::new(self.world_width, self.world_height));
     }
 }
 
@@ -491,12 +501,36 @@ pub fn run() -> io::Result<()> {
                             GameState::Menu => {
                                 game.state = GameState::Menu;
                                 game.playing = None;
+                                game.start_demo();
                             }
                             _ => {}
                         }
                         break;
                     }
                 }
+            }
+        } else if game.state == GameState::Menu {
+            // Tick attract mode demo
+            let updates = accumulator.accumulate(elapsed);
+            let mut demo_over = false;
+            for _ in 0..updates {
+                if let Some(ref mut demo) = game.demo {
+                    let ai_input = demo_ai::generate_demo_input(
+                        &demo.ship,
+                        &demo.asteroids,
+                        world_width,
+                        world_height,
+                    );
+                    if let Some(new_state) = demo.update(&ai_input, TIMESTEP, world_width, world_height) {
+                        if new_state == GameState::GameOver || new_state == GameState::Menu {
+                            demo_over = true;
+                        }
+                        break;
+                    }
+                }
+            }
+            if demo_over {
+                game.start_demo();
             }
         }
 
@@ -524,18 +558,67 @@ pub fn run() -> io::Result<()> {
 
             match game.state {
                 GameState::Menu => {
-                    let text = vec![
-                        Line::from(""),
-                        Line::from(""),
-                        Line::from(Span::styled(
+                    let cols = area.width as usize;
+                    let rows = area.height as usize;
+
+                    // Render demo game as background (attract mode)
+                    let mut lines: Vec<Line> = Vec::new();
+                    if let Some(ref demo) = game.demo {
+                        let mut buf = BrailleBuffer::new(cols, rows);
+                        // Draw asteroids
+                        for asteroid in &demo.asteroids {
+                            let verts = asteroid.world_vertices();
+                            buf.draw_polygon(&verts, world_width, world_height);
+                        }
+                        // Draw bullets
+                        for bullet in &demo.bullet_pool.bullets {
+                            if bullet.alive {
+                                let dot_x = (bullet.position.x / world_width * buf.dot_width() as f64) as i32;
+                                let dot_y = (bullet.position.y / world_height * buf.dot_height() as f64) as i32;
+                                buf.set_dot(dot_x, dot_y);
+                                buf.set_dot(dot_x + 1, dot_y);
+                                buf.set_dot(dot_x, dot_y + 1);
+                                buf.set_dot(dot_x + 1, dot_y + 1);
+                            }
+                        }
+                        // Draw ship
+                        let draw_ship = if demo.ship.invulnerable {
+                            renderer::ship_blink_visible(demo.frame_count)
+                        } else {
+                            true
+                        };
+                        if draw_ship && demo.ship.lives > 0 {
+                            let ship_verts = demo.ship.vertices();
+                            buf.draw_polygon(&ship_verts, world_width, world_height);
+                        }
+                        // Convert buffer to lines (no HUD for attract mode)
+                        for row in 0..buf.rows {
+                            let mut spans = String::new();
+                            for col in 0..buf.cols {
+                                spans.push(buf.get_char(col, row));
+                            }
+                            lines.push(Line::from(spans));
+                        }
+                    } else {
+                        // No demo — fill with empty lines
+                        for _ in 0..rows {
+                            lines.push(Line::from(""));
+                        }
+                    }
+
+                    // Overlay menu text at vertical center
+                    let center = rows / 2;
+                    if center >= 2 && center + 2 < lines.len() {
+                        lines[center - 2] = Line::from(Span::styled(
                             "    TUISTEROIDS",
                             Style::default().fg(Color::White),
-                        )),
-                        Line::from(""),
-                        Line::from("    Press any key to start"),
-                        Line::from("    Press Q to quit"),
-                    ];
-                    let paragraph = Paragraph::new(text)
+                        ));
+                        lines[center - 1] = Line::from("");
+                        lines[center] = Line::from("    Press any key to start");
+                        lines[center + 1] = Line::from("    Press Q to quit");
+                    }
+
+                    let paragraph = Paragraph::new(lines)
                         .block(Block::default());
                     frame.render_widget(paragraph, area);
                 }
@@ -791,7 +874,7 @@ mod tests {
             playing.bullet_pool.bullets.push(crate::bullets::Bullet {
                 position: asteroid_pos,
                 velocity: Vec2::new(0.0, 0.0),
-                frames_alive: 0,
+                distance_traveled: 0.0,
                 alive: true,
             });
         }
@@ -889,7 +972,7 @@ mod tests {
         playing.bullet_pool.bullets.push(crate::bullets::Bullet {
             position: Vec2::new(100.0, 100.0),
             velocity: Vec2::new(0.0, 0.0),
-            frames_alive: 0,
+            distance_traveled: 0.0,
             alive: true,
         });
         let input = InputState::default();
@@ -912,7 +995,7 @@ mod tests {
         playing.bullet_pool.bullets.push(crate::bullets::Bullet {
             position: Vec2::new(100.0, 100.0),
             velocity: Vec2::new(0.0, 0.0),
-            frames_alive: 0,
+            distance_traveled: 0.0,
             alive: true,
         });
         let input = InputState::default();
@@ -994,5 +1077,104 @@ mod tests {
         game.state = GameState::GameOver;
         let quit = game.handle_key(KeyCode::Char('q'));
         assert!(quit);
+    }
+
+    // === Requirement: Attract Mode Demo Game ===
+
+    // Scenario: Demo game starts on application launch
+    #[test]
+    fn test_game_starts_with_demo() {
+        let game = Game::new(800.0, 600.0);
+        assert_eq!(game.state, GameState::Menu);
+        assert!(game.demo.is_some());
+    }
+
+    // Scenario: Demo game updates with AI input
+    #[test]
+    fn test_demo_updates_with_ai_input() {
+        let mut game = Game::new(800.0, 600.0);
+        let demo = game.demo.as_mut().unwrap();
+        let initial_frame = demo.frame_count;
+        let ai_input = crate::demo_ai::generate_demo_input(
+            &demo.ship,
+            &demo.asteroids,
+            800.0,
+            600.0,
+        );
+        demo.update(&ai_input, TIMESTEP, 800.0, 600.0);
+        assert_eq!(demo.frame_count, initial_frame + 1);
+    }
+
+    // Scenario: Demo resets on game over
+    #[test]
+    fn test_demo_resets_on_game_over() {
+        let mut game = Game::new(800.0, 600.0);
+        // Force the demo ship to die
+        if let Some(ref mut demo) = game.demo {
+            demo.ship.lives = 1;
+            demo.ship.invulnerable = false;
+            // Place asteroid on ship
+            let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+            demo.asteroids.clear();
+            demo.asteroids.push(crate::asteroids::Asteroid::new(
+                demo.ship.position,
+                Vec2::new(0.0, 0.0),
+                crate::asteroids::AsteroidSize::Large,
+                &mut rng,
+            ));
+            let input = InputState::default();
+            let result = demo.update(&input, TIMESTEP, 800.0, 600.0);
+            assert_eq!(result, Some(GameState::GameOver));
+        }
+        // After detecting game over, reset demo
+        game.start_demo();
+        assert!(game.demo.is_some());
+        assert_eq!(game.demo.as_ref().unwrap().ship.lives, 3);
+    }
+
+    // Scenario: Demo discarded on game start
+    #[test]
+    fn test_demo_discarded_on_game_start() {
+        let mut game = Game::new(800.0, 600.0);
+        assert!(game.demo.is_some());
+        game.handle_key(KeyCode::Enter);
+        assert_eq!(game.state, GameState::Playing);
+        assert!(game.demo.is_none());
+        assert!(game.playing.is_some());
+    }
+
+    // Scenario: Demo restarts when returning to menu from game over
+    #[test]
+    fn test_demo_restarts_from_game_over() {
+        let mut game = Game::new(800.0, 600.0);
+        game.state = GameState::GameOver;
+        game.demo = None;
+        game.handle_key(KeyCode::Enter);
+        assert_eq!(game.state, GameState::Menu);
+        assert!(game.demo.is_some());
+    }
+
+    // Scenario: Demo restarts when returning to menu from playing
+    #[test]
+    fn test_demo_restarts_from_playing_quit() {
+        let mut game = Game::new(800.0, 600.0);
+        game.handle_key(KeyCode::Enter); // start playing
+        assert!(game.demo.is_none());
+        // Simulate quit returning to menu
+        game.state = GameState::Menu;
+        game.playing = None;
+        game.start_demo();
+        assert!(game.demo.is_some());
+    }
+
+    // Additional coverage: start_demo creates fresh PlayingState
+    #[test]
+    fn test_start_demo() {
+        let mut game = Game::new(800.0, 600.0);
+        game.demo = None;
+        game.start_demo();
+        assert!(game.demo.is_some());
+        assert_eq!(game.demo.as_ref().unwrap().score, 0);
+        assert_eq!(game.demo.as_ref().unwrap().wave, 1);
     }
 }

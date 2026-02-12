@@ -11,6 +11,24 @@ pub fn toroidal_distance(a: Vec2, b: Vec2, width: f64, height: f64) -> f64 {
     (dx * dx + dy * dy).sqrt()
 }
 
+/// Calculate the shortest-path direction vector between two points on a toroidal surface.
+/// The result's magnitude equals the toroidal distance.
+pub fn toroidal_direction(from: Vec2, to: Vec2, width: f64, height: f64) -> Vec2 {
+    let mut dx = to.x - from.x;
+    let mut dy = to.y - from.y;
+    if dx > width / 2.0 {
+        dx -= width;
+    } else if dx < -width / 2.0 {
+        dx += width;
+    }
+    if dy > height / 2.0 {
+        dy -= height;
+    } else if dy < -height / 2.0 {
+        dy += height;
+    }
+    Vec2::new(dx, dy)
+}
+
 /// Check if two circles collide (distance between centers < sum of radii).
 pub fn circles_collide(pos_a: Vec2, radius_a: f64, pos_b: Vec2, radius_b: f64) -> bool {
     let dist = ((pos_a.x - pos_b.x).powi(2) + (pos_a.y - pos_b.y).powi(2)).sqrt();
@@ -313,6 +331,74 @@ mod tests {
             600.0,
         );
         assert_eq!(result, BulletAsteroidResult::AsteroidDestroyed);
+    }
+
+    // === Requirement: Toroidal Direction Calculation ===
+
+    // Scenario: Direct direction is shortest
+    #[test]
+    fn test_toroidal_direction_direct() {
+        let dir = toroidal_direction(
+            Vec2::new(100.0, 100.0),
+            Vec2::new(150.0, 100.0),
+            800.0,
+            600.0,
+        );
+        assert!(approx_eq(dir.x, 50.0));
+        assert!(approx_eq(dir.y, 0.0));
+    }
+
+    // Scenario: Wrapped horizontal direction is shorter
+    #[test]
+    fn test_toroidal_direction_wrapped_horizontal() {
+        let dir = toroidal_direction(
+            Vec2::new(10.0, 300.0),
+            Vec2::new(790.0, 300.0),
+            800.0,
+            600.0,
+        );
+        assert!(approx_eq(dir.x, -20.0));
+        assert!(approx_eq(dir.y, 0.0));
+    }
+
+    // Scenario: Wrapped vertical direction is shorter
+    #[test]
+    fn test_toroidal_direction_wrapped_vertical() {
+        let dir = toroidal_direction(
+            Vec2::new(400.0, 10.0),
+            Vec2::new(400.0, 590.0),
+            800.0,
+            600.0,
+        );
+        assert!(approx_eq(dir.x, 0.0));
+        assert!(approx_eq(dir.y, -20.0));
+    }
+
+    // Scenario: Both axes wrap
+    #[test]
+    fn test_toroidal_direction_both_axes_wrap() {
+        let dir = toroidal_direction(
+            Vec2::new(10.0, 10.0),
+            Vec2::new(790.0, 590.0),
+            800.0,
+            600.0,
+        );
+        assert!(approx_eq(dir.x, -20.0));
+        assert!(approx_eq(dir.y, -20.0));
+    }
+
+    // Additional coverage: wrap direction when from > to (negative delta branches)
+    #[test]
+    fn test_toroidal_direction_negative_wrap() {
+        // from=(790,590) to=(10,10): dx=10-790=-780 < -400 → dx+=800=20, dy=10-590=-580 < -300 → dy+=600=20
+        let dir = toroidal_direction(
+            Vec2::new(790.0, 590.0),
+            Vec2::new(10.0, 10.0),
+            800.0,
+            600.0,
+        );
+        assert!(approx_eq(dir.x, 20.0));
+        assert!(approx_eq(dir.y, 20.0));
     }
 
     // Scenario: Bullet and asteroid at wrapping boundary

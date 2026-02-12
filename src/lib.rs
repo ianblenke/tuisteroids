@@ -5,4 +5,5 @@ pub mod ship;
 pub mod asteroids;
 pub mod bullets;
 pub mod renderer;
+pub mod demo_ai;
 pub mod game;

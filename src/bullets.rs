@@ -3,14 +3,14 @@
 use crate::physics::{self, Vec2};
 
 pub const BULLET_SPEED: f64 = 500.0; // units per second
-pub const BULLET_LIFETIME: u32 = 60; // frames at 60 FPS = 1 second
+pub const BULLET_RANGE_FRACTION: f64 = 0.8; // bullets travel 80% of world width (matches original Asteroids)
 pub const MAX_BULLETS: usize = 4;
 pub const BULLET_RADIUS: f64 = 2.0;
 
 pub struct Bullet {
     pub position: Vec2,
     pub velocity: Vec2,
-    pub frames_alive: u32,
+    pub distance_traveled: f64,
     pub alive: bool,
 }
 
@@ -21,17 +21,17 @@ impl Bullet {
         Self {
             position,
             velocity,
-            frames_alive: 0,
+            distance_traveled: 0.0,
             alive: true,
         }
     }
 
-    /// Update bullet position and lifetime.
+    /// Update bullet position and lifetime (distance-based, matching original Asteroids).
     pub fn update(&mut self, dt: f64, world_width: f64, world_height: f64) {
         self.position = physics::integrate_motion(self.position, self.velocity, dt);
         self.position = physics::wrap_position(self.position, world_width, world_height);
-        self.frames_alive += 1;
-        if self.frames_alive >= BULLET_LIFETIME {
+        self.distance_traveled += self.velocity.magnitude() * dt;
+        if self.distance_traveled >= world_width * BULLET_RANGE_FRACTION {
             self.alive = false;
         }
     }
@@ -122,26 +122,45 @@ mod tests {
         assert!(approx_eq(bullet.velocity.y, 0.0));
     }
 
-    // === Requirement: Bullet Lifetime ===
+    // === Requirement: Bullet Lifetime (distance-based, matching original Asteroids) ===
 
-    // Scenario: Bullet exists within lifetime
+    // Scenario: Bullet exists within travel distance
     #[test]
-    fn test_bullet_alive_within_lifetime() {
+    fn test_bullet_alive_within_travel_distance() {
+        // world_width=800, so max range = 640. At 500 u/s, bullet travels ~8.33 units/frame.
+        // After 30 frames: ~250 units traveled, well under 640.
         let mut bullet = Bullet::new(Vec2::new(0.0, 0.0), 0.0);
         for _ in 0..30 {
             bullet.update(1.0 / 60.0, 800.0, 600.0);
         }
         assert!(bullet.alive);
-        assert_eq!(bullet.frames_alive, 30);
+        assert!(bullet.distance_traveled < 800.0 * BULLET_RANGE_FRACTION);
     }
 
-    // Scenario: Bullet destroyed after lifetime expires
+    // Scenario: Bullet destroyed after exceeding travel distance
     #[test]
-    fn test_bullet_destroyed_after_lifetime() {
+    fn test_bullet_destroyed_after_exceeding_travel_distance() {
+        // At 500 u/s and world_width=800, max range=640. Frames needed: 640/(500/60) = ~76.8
         let mut bullet = Bullet::new(Vec2::new(0.0, 0.0), 0.0);
-        for _ in 0..BULLET_LIFETIME {
+        for _ in 0..77 {
             bullet.update(1.0 / 60.0, 800.0, 600.0);
         }
+        assert!(!bullet.alive);
+        assert!(bullet.distance_traveled >= 800.0 * BULLET_RANGE_FRACTION);
+    }
+
+    // Scenario: Distance threshold scales with world width
+    #[test]
+    fn test_bullet_distance_scales_with_world_width() {
+        // world_width=1000, max range=800. At 500 u/s, frames needed: 800/(500/60) = 96
+        // After 95 frames: ~791.67 units, still alive. After 96: 800.0 = threshold, dead.
+        let mut bullet = Bullet::new(Vec2::new(0.0, 0.0), 0.0);
+        for _ in 0..95 {
+            bullet.update(1.0 / 60.0, 1000.0, 600.0);
+        }
+        assert!(bullet.alive);
+        // Compared to world_width=800 (dies at ~77 frames), wider world = longer range
+        bullet.update(1.0 / 60.0, 1000.0, 600.0); // 96th frame hits threshold
         assert!(!bullet.alive);
     }
 
@@ -177,8 +196,8 @@ mod tests {
             pool.fire(Vec2::new(0.0, 0.0), 0.0);
         }
         assert_eq!(pool.active_count(), 4);
-        // Expire all bullets
-        for _ in 0..BULLET_LIFETIME {
+        // Expire all bullets (need ~77 frames for 800-wide world at 500 u/s)
+        for _ in 0..80 {
             pool.update(1.0 / 60.0, 800.0, 600.0);
         }
         assert_eq!(pool.active_count(), 0);
