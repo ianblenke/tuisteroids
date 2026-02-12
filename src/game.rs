@@ -1,6 +1,7 @@
 // Game loop capability: fixed timestep, state machine, update sequence
 
 use crate::asteroids::{self, Asteroid, AsteroidSize};
+use crate::audio::{AudioEvent, UpdateResult};
 use crate::bullets::{self, BulletPool};
 use crate::collision;
 use crate::demo_ai;
@@ -123,17 +124,22 @@ impl PlayingState {
         }
     }
 
-    /// Perform one fixed-timestep update. Returns new GameState if transition needed.
+    /// Perform one fixed-timestep update. Returns UpdateResult with state transition and audio events.
     pub fn update(
         &mut self,
         input: &InputState,
         dt: f64,
         world_width: f64,
         world_height: f64,
-    ) -> Option<GameState> {
+    ) -> UpdateResult {
+        let mut audio_events: Vec<AudioEvent> = Vec::new();
+
         // 1. Process input
         if input.is_active(Action::Quit) {
-            return Some(GameState::Menu);
+            return UpdateResult {
+                state: Some(GameState::Menu),
+                audio_events,
+            };
         }
 
         // 2. Update ship
@@ -144,6 +150,7 @@ impl PlayingState {
         );
         if input.is_active(Action::Thrust) {
             self.ship.thrust(dt);
+            audio_events.push(AudioEvent::Thrust);
         }
         self.ship.velocity = physics::apply_drag(self.ship.velocity, DRAG_FACTOR);
         self.ship.update(dt, world_width, world_height);
@@ -155,6 +162,7 @@ impl PlayingState {
         if input.is_active(Action::Fire) {
             let nose = self.ship.nose_position();
             self.bullet_pool.fire(nose, self.ship.rotation);
+            audio_events.push(AudioEvent::Fire);
         }
 
         // 4. Update asteroids
@@ -195,6 +203,11 @@ impl PlayingState {
                         bullets_to_remove.push(bi);
                         asteroids_to_remove.push(ai);
                         score_gained += asteroid.size.points();
+                        match asteroid.size {
+                            AsteroidSize::Large => audio_events.push(AudioEvent::AsteroidExplosionLarge),
+                            AsteroidSize::Medium => audio_events.push(AudioEvent::AsteroidExplosionMedium),
+                            AsteroidSize::Small => audio_events.push(AudioEvent::AsteroidExplosionSmall),
+                        }
                         if let Some(children) = asteroid.split(&mut self.rng) {
                             new_asteroids.extend(children);
                         }
@@ -204,6 +217,11 @@ impl PlayingState {
                         bullets_to_remove.push(bi);
                         asteroids_to_remove.push(ai);
                         score_gained += asteroid.size.points();
+                        match asteroid.size {
+                            AsteroidSize::Large => audio_events.push(AudioEvent::AsteroidExplosionLarge),
+                            AsteroidSize::Medium => audio_events.push(AudioEvent::AsteroidExplosionMedium),
+                            AsteroidSize::Small => audio_events.push(AudioEvent::AsteroidExplosionSmall),
+                        }
                         break;
                     }
                     collision::BulletAsteroidResult::NoCollision => {}
@@ -227,8 +245,12 @@ impl PlayingState {
         self.asteroids.extend(new_asteroids);
 
         // 6. Process scoring
+        let prev_lives = self.ship.lives;
         self.score += score_gained;
         self.ship.check_extra_life(self.score);
+        if self.ship.lives > prev_lives {
+            audio_events.push(AudioEvent::ExtraLife);
+        }
 
         // Ship-asteroid collision
         for asteroid in &self.asteroids {
@@ -245,11 +267,16 @@ impl PlayingState {
             match result {
                 collision::ShipCollisionResult::ShipDestroyed { .. } => {
                     self.ship.destroy(world_width, world_height);
+                    audio_events.push(AudioEvent::ShipDestroyed);
                     break;
                 }
                 collision::ShipCollisionResult::GameOver => {
                     self.ship.lives = 0;
-                    return Some(GameState::GameOver);
+                    audio_events.push(AudioEvent::ShipDestroyed);
+                    return UpdateResult {
+                        state: Some(GameState::GameOver),
+                        audio_events,
+                    };
                 }
                 collision::ShipCollisionResult::NoCollision => {}
             }
@@ -269,11 +296,15 @@ impl PlayingState {
                     world_height,
                     &mut self.rng,
                 );
+                audio_events.push(AudioEvent::NewWave);
             }
         }
 
         self.frame_count += 1;
-        None
+        UpdateResult {
+            state: None,
+            audio_events,
+        }
     }
 }
 
@@ -378,6 +409,7 @@ pub fn run() -> io::Result<()> {
     let world_height = 600.0_f64;
 
     let mut game = Game::new(world_width, world_height);
+    let audio_engine = crate::audio::AudioEngine::try_new();
     let mut input_state = InputState::default();
     let mut fire_detector = FireEdgeDetector::new();
     let mut accumulator = TimeAccumulator::new(TIMESTEP);
@@ -490,12 +522,16 @@ pub fn run() -> io::Result<()> {
             let updates = accumulator.accumulate(elapsed);
             for _ in 0..updates {
                 if let Some(ref mut playing) = game.playing {
-                    if let Some(new_state) = playing.update(
+                    let result = playing.update(
                         &input_state,
                         TIMESTEP,
                         world_width,
                         world_height,
-                    ) {
+                    );
+                    for event in &result.audio_events {
+                        audio_engine.play(event);
+                    }
+                    if let Some(new_state) = result.state {
                         match new_state {
                             GameState::GameOver => game.game_over(),
                             GameState::Menu => {
@@ -521,7 +557,8 @@ pub fn run() -> io::Result<()> {
                         world_width,
                         world_height,
                     );
-                    if let Some(new_state) = demo.update(&ai_input, TIMESTEP, world_width, world_height) {
+                    let demo_result = demo.update(&ai_input, TIMESTEP, world_width, world_height);
+                    if let Some(new_state) = demo_result.state {
                         if new_state == GameState::GameOver || new_state == GameState::Menu {
                             demo_over = true;
                         }
@@ -825,7 +862,7 @@ mod tests {
             ..Default::default()
         };
         let result = playing.update(&input, TIMESTEP, 800.0, 600.0);
-        assert_eq!(result, Some(GameState::Menu));
+        assert_eq!(result.state, Some(GameState::Menu));
     }
 
     // Scenario: GameOver transitions to Menu on key press
@@ -904,7 +941,7 @@ mod tests {
             ..Default::default()
         };
         let result = playing.update(&input, TIMESTEP, 800.0, 600.0);
-        assert_eq!(result, Some(GameState::Menu));
+        assert_eq!(result.state, Some(GameState::Menu));
     }
 
     // Scenario: Terminal restored on exit
@@ -1040,7 +1077,7 @@ mod tests {
         playing.ship.invulnerable = false;
         let input = InputState::default();
         let result = playing.update(&input, TIMESTEP, 800.0, 600.0);
-        assert_eq!(result, Some(GameState::GameOver));
+        assert_eq!(result.state, Some(GameState::GameOver));
     }
 
     // Additional coverage: wave completion
@@ -1124,7 +1161,7 @@ mod tests {
             ));
             let input = InputState::default();
             let result = demo.update(&input, TIMESTEP, 800.0, 600.0);
-            assert_eq!(result, Some(GameState::GameOver));
+            assert_eq!(result.state, Some(GameState::GameOver));
         }
         // After detecting game over, reset demo
         game.start_demo();
@@ -1176,5 +1213,188 @@ mod tests {
         assert!(game.demo.is_some());
         assert_eq!(game.demo.as_ref().unwrap().score, 0);
         assert_eq!(game.demo.as_ref().unwrap().wave, 1);
+    }
+
+    // === Requirement: Game Update Sequence — Audio Event Emission ===
+
+    // Scenario: Update returns audio events for fire
+    #[test]
+    fn test_update_emits_fire_audio_event() {
+        let mut playing = PlayingState::new_seeded(800.0, 600.0, 42);
+        let input = InputState {
+            fire: true,
+            ..Default::default()
+        };
+        let result = playing.update(&input, TIMESTEP, 800.0, 600.0);
+        assert!(result.audio_events.contains(&crate::audio::AudioEvent::Fire));
+    }
+
+    // Scenario: Update returns audio events for thrust
+    #[test]
+    fn test_update_emits_thrust_audio_event() {
+        let mut playing = PlayingState::new_seeded(800.0, 600.0, 42);
+        let input = InputState {
+            thrust: true,
+            ..Default::default()
+        };
+        let result = playing.update(&input, TIMESTEP, 800.0, 600.0);
+        assert!(result.audio_events.contains(&crate::audio::AudioEvent::Thrust));
+    }
+
+    // Scenario: Update returns audio events for asteroid destruction (large)
+    #[test]
+    fn test_update_emits_large_asteroid_explosion() {
+        let mut playing = PlayingState::new_seeded(800.0, 600.0, 42);
+        playing.asteroids.clear();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        playing.asteroids.push(crate::asteroids::Asteroid::new(
+            Vec2::new(100.0, 100.0),
+            Vec2::new(0.0, 0.0),
+            crate::asteroids::AsteroidSize::Large,
+            &mut rng,
+        ));
+        playing.bullet_pool.bullets.push(crate::bullets::Bullet {
+            position: Vec2::new(100.0, 100.0),
+            velocity: Vec2::new(0.0, 0.0),
+            distance_traveled: 0.0,
+            alive: true,
+        });
+        let input = InputState::default();
+        let result = playing.update(&input, TIMESTEP, 800.0, 600.0);
+        assert!(result.audio_events.contains(&crate::audio::AudioEvent::AsteroidExplosionLarge));
+    }
+
+    // Scenario: Update returns audio events for asteroid destruction (medium)
+    #[test]
+    fn test_update_emits_medium_asteroid_explosion() {
+        let mut playing = PlayingState::new_seeded(800.0, 600.0, 42);
+        playing.asteroids.clear();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        playing.asteroids.push(crate::asteroids::Asteroid::new(
+            Vec2::new(100.0, 100.0),
+            Vec2::new(0.0, 0.0),
+            crate::asteroids::AsteroidSize::Medium,
+            &mut rng,
+        ));
+        playing.bullet_pool.bullets.push(crate::bullets::Bullet {
+            position: Vec2::new(100.0, 100.0),
+            velocity: Vec2::new(0.0, 0.0),
+            distance_traveled: 0.0,
+            alive: true,
+        });
+        let input = InputState::default();
+        let result = playing.update(&input, TIMESTEP, 800.0, 600.0);
+        assert!(result.audio_events.contains(&crate::audio::AudioEvent::AsteroidExplosionMedium));
+    }
+
+    // Scenario: Update returns audio events for asteroid destruction (small)
+    #[test]
+    fn test_update_emits_small_asteroid_explosion() {
+        let mut playing = PlayingState::new_seeded(800.0, 600.0, 42);
+        playing.asteroids.clear();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        playing.asteroids.push(crate::asteroids::Asteroid::new(
+            Vec2::new(100.0, 100.0),
+            Vec2::new(0.0, 0.0),
+            crate::asteroids::AsteroidSize::Small,
+            &mut rng,
+        ));
+        playing.bullet_pool.bullets.push(crate::bullets::Bullet {
+            position: Vec2::new(100.0, 100.0),
+            velocity: Vec2::new(0.0, 0.0),
+            distance_traveled: 0.0,
+            alive: true,
+        });
+        let input = InputState::default();
+        let result = playing.update(&input, TIMESTEP, 800.0, 600.0);
+        assert!(result.audio_events.contains(&crate::audio::AudioEvent::AsteroidExplosionSmall));
+    }
+
+    // Scenario: Update returns audio events for ship destruction
+    #[test]
+    fn test_update_emits_ship_destroyed_audio_event() {
+        let mut playing = PlayingState::new_seeded(800.0, 600.0, 42);
+        playing.asteroids.clear();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        playing.asteroids.push(crate::asteroids::Asteroid::new(
+            playing.ship.position,
+            Vec2::new(0.0, 0.0),
+            crate::asteroids::AsteroidSize::Large,
+            &mut rng,
+        ));
+        playing.ship.invulnerable = false;
+        let input = InputState::default();
+        let result = playing.update(&input, TIMESTEP, 800.0, 600.0);
+        assert!(result.audio_events.contains(&crate::audio::AudioEvent::ShipDestroyed));
+    }
+
+    // Scenario: Update returns audio events for ship destruction (game over path)
+    #[test]
+    fn test_update_emits_ship_destroyed_on_game_over() {
+        let mut playing = PlayingState::new_seeded(800.0, 600.0, 42);
+        playing.asteroids.clear();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        playing.asteroids.push(crate::asteroids::Asteroid::new(
+            playing.ship.position,
+            Vec2::new(0.0, 0.0),
+            crate::asteroids::AsteroidSize::Large,
+            &mut rng,
+        ));
+        playing.ship.lives = 1;
+        playing.ship.invulnerable = false;
+        let input = InputState::default();
+        let result = playing.update(&input, TIMESTEP, 800.0, 600.0);
+        assert_eq!(result.state, Some(GameState::GameOver));
+        assert!(result.audio_events.contains(&crate::audio::AudioEvent::ShipDestroyed));
+    }
+
+    // Scenario: Update returns audio events for extra life
+    #[test]
+    fn test_update_emits_extra_life_audio_event() {
+        let mut playing = PlayingState::new_seeded(800.0, 600.0, 42);
+        // Set score just below extra life threshold
+        playing.score = 9_980;
+        playing.ship.extra_life_awarded = false;
+        // Place a bullet on a small asteroid (100 points) to push past 10,000
+        playing.asteroids.clear();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+        playing.asteroids.push(crate::asteroids::Asteroid::new(
+            Vec2::new(100.0, 100.0),
+            Vec2::new(0.0, 0.0),
+            crate::asteroids::AsteroidSize::Small,
+            &mut rng,
+        ));
+        playing.bullet_pool.bullets.push(crate::bullets::Bullet {
+            position: Vec2::new(100.0, 100.0),
+            velocity: Vec2::new(0.0, 0.0),
+            distance_traveled: 0.0,
+            alive: true,
+        });
+        let input = InputState::default();
+        let result = playing.update(&input, TIMESTEP, 800.0, 600.0);
+        assert!(result.audio_events.contains(&crate::audio::AudioEvent::ExtraLife));
+    }
+
+    // Scenario: Update returns audio events for new wave
+    #[test]
+    fn test_update_emits_new_wave_audio_event() {
+        let mut playing = PlayingState::new_seeded(800.0, 600.0, 42);
+        playing.asteroids.clear();
+        // Fast-forward the wave delay timer to just under the threshold
+        playing.wave_delay_timer = WAVE_DELAY - TIMESTEP * 0.5;
+        let input = InputState::default();
+        let result = playing.update(&input, TIMESTEP, 800.0, 600.0);
+        assert!(result.audio_events.contains(&crate::audio::AudioEvent::NewWave));
+    }
+
+    // Scenario: Update returns empty audio events when nothing happens
+    #[test]
+    fn test_update_empty_audio_events() {
+        let mut playing = PlayingState::new_seeded(800.0, 600.0, 42);
+        // Make ship invulnerable so no ship collision audio
+        playing.ship.invulnerable = true;
+        let input = InputState::default();
+        let result = playing.update(&input, TIMESTEP, 800.0, 600.0);
+        assert!(result.audio_events.is_empty());
     }
 }

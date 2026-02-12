@@ -10,6 +10,7 @@ unexpected_cfgs = { level = "allow", check-cfg = ['cfg(tarpaulin_include)'] }
 ratatui = "0.29"
 crossterm = "0.28"
 rand = "0.8"
+rodio = "0.19"
 
 [dev-dependencies]
 
