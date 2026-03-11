@@ -639,7 +639,7 @@ pub fn run() -> io::Result<()> {
                             "    TUISTEROIDS",
                             Style::default().fg(Color::White),
                         ));
-                        lines[center - 1] = Line::from("");
+                        // Leave center-1 row unchanged so braille background shows through
                         lines[center] = Line::from("    Press any key to start");
                         lines[center + 1] = Line::from("    Press Q to quit");
                     }
