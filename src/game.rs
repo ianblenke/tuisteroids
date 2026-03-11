@@ -632,16 +632,23 @@ pub fn run() -> io::Result<()> {
                         }
                     }
 
-                    // Overlay menu text at vertical center
+                    // Overlay menu text at vertical center, preserving braille background
                     let center = rows / 2;
                     if center >= 2 && center + 2 < lines.len() {
-                        lines[center - 2] = Line::from(Span::styled(
-                            "    TUISTEROIDS",
-                            Style::default().fg(Color::White),
-                        ));
-                        // Leave center-1 row unchanged so braille background shows through
-                        lines[center] = Line::from("    Press any key to start");
-                        lines[center + 1] = Line::from("    Press Q to quit");
+                        let overlay = |line: &Line, text: &str, style: Style| -> Line {
+                            let existing: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                            let text_chars: usize = text.chars().count();
+                            let remaining: String = existing.chars().skip(text_chars).collect();
+                            Line::from(vec![
+                                Span::styled(text.to_string(), style),
+                                Span::raw(remaining),
+                            ])
+                        };
+                        let white = Style::default().fg(Color::White);
+                        lines[center - 2] = overlay(&lines[center - 2], "    TUISTEROIDS", white);
+                        // center-1 left unchanged so braille background shows through
+                        lines[center] = overlay(&lines[center], "    Press any key to start", Style::default());
+                        lines[center + 1] = overlay(&lines[center + 1], "    Press Q to quit", Style::default());
                     }
 
                     let paragraph = Paragraph::new(lines).block(Block::default());
