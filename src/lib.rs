@@ -5,6 +5,7 @@ pub mod collision;
 pub mod demo_ai;
 pub mod game;
 pub mod input;
+pub mod leaderboard;
 pub mod physics;
 pub mod renderer;
 pub mod ship;

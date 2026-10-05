@@ -44,6 +44,22 @@ cargo build --release
 cargo run --release
 ```
 
+## Leaderboard (optional)
+
+With `--leaderboard`, the game posts your final score to a leaderboard service when a game ends and shows the top ten on the game-over screen. Without the flag nothing changes: no network connections are made.
+
+```bash
+tuisteroids --leaderboard [--player NAME] [--leaderboard-url URL]
+```
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--leaderboard` | off | Enable score reporting |
+| `--player NAME` | `$USER`, then `$LOGNAME`, then `player` | Name to report (1-64 characters; trimmed and truncated) |
+| `--leaderboard-url URL` | `http://localhost:8088` | Service base URL (`http://` only; e.g. `http://localhost:8081`) |
+
+The service calls (`POST /scores`, `GET /top?n=10`) run on a background thread with 1.5 s socket timeouts, so the game never stalls. If the service is unreachable or answers with an error, the game-over screen shows a single `Leaderboard unavailable: ...` line and play continues as normal.
+
 ## Testing
 
 The project enforces spec-first TDD with 100% code coverage.
@@ -79,6 +95,7 @@ src/
   input.rs       Keyboard polling and action mapping
   demo_ai.rs     AI controller for attract mode
   audio.rs       Procedural sound synthesis
+  leaderboard.rs Optional score reporting (CLI flags, http client, game-over report)
 ```
 
 ## Development

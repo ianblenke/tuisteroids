@@ -6,6 +6,7 @@ use crate::bullets::{self, BulletPool};
 use crate::collision;
 use crate::demo_ai;
 use crate::input::{self, Action, FireEdgeDetector, InputState};
+use crate::leaderboard::{LeaderboardClient, Options};
 use crate::physics;
 use crate::renderer::{self, BrailleBuffer};
 use crate::ship::Ship;
@@ -308,6 +309,8 @@ pub struct Game {
     pub final_score: u32,
     pub world_width: f64,
     pub world_height: f64,
+    /// Present only with --leaderboard; None means no network activity at all.
+    pub leaderboard: Option<LeaderboardClient>,
 }
 
 impl Game {
@@ -319,6 +322,7 @@ impl Game {
             final_score: 0,
             world_width,
             world_height,
+            leaderboard: None,
         }
     }
 
@@ -347,13 +351,45 @@ impl Game {
         }
     }
 
-    /// Transition to game over.
+    /// Transition to game over. Starts the leaderboard report when configured.
     pub fn game_over(&mut self) {
         if let Some(ref playing) = self.playing {
             self.final_score = playing.score;
         }
         self.state = GameState::GameOver;
         self.playing = None;
+        if let Some(leaderboard) = self.leaderboard.as_mut() {
+            leaderboard.start(self.final_score);
+        }
+    }
+
+    /// Pick up a finished leaderboard report without blocking (no-op when unconfigured).
+    pub fn poll_leaderboard(&mut self) {
+        if let Some(leaderboard) = self.leaderboard.as_mut() {
+            leaderboard.poll();
+        }
+    }
+
+    /// Text of the game-over screen; leaderboard lines sit between the score
+    /// and the restart prompt, and only when a client is configured.
+    pub fn game_over_lines(&self) -> Vec<String> {
+        let mut lines = vec![
+            String::new(),
+            String::new(),
+            "    GAME OVER".to_string(),
+            String::new(),
+            format!("    Score: {}", self.final_score),
+        ];
+        if let Some(leaderboard) = &self.leaderboard {
+            let extra = leaderboard.lines();
+            if !extra.is_empty() {
+                lines.push(String::new());
+                lines.extend(extra.into_iter().map(|line| format!("    {}", line)));
+            }
+        }
+        lines.push(String::new());
+        lines.push("    Press any key to restart or Q to quit".to_string());
+        lines
     }
 
     /// Start a new demo (attract mode) game.
@@ -374,7 +410,7 @@ pub fn frame_sleep_duration(frame_start: Instant, target_frame_time: Duration) -
 
 /// Run the main game loop (real terminal I/O).
 #[cfg(not(tarpaulin_include))]
-pub fn run() -> io::Result<()> {
+pub fn run(options: Options) -> io::Result<()> {
     // Setup terminal
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -401,6 +437,9 @@ pub fn run() -> io::Result<()> {
     let world_height = 600.0_f64;
 
     let mut game = Game::new(world_width, world_height);
+    if options.leaderboard {
+        game.leaderboard = Some(LeaderboardClient::new(&options.url, &options.player));
+    }
     let audio_engine = crate::audio::AudioEngine::try_new();
     let mut input_state = InputState::default();
     let mut fire_detector = FireEdgeDetector::new();
@@ -574,6 +613,11 @@ pub fn run() -> io::Result<()> {
             input_state.quit = false;
         }
 
+        // Pick up the leaderboard result, if any, without blocking.
+        if game.state == GameState::GameOver {
+            game.poll_leaderboard();
+        }
+
         // Render
         terminal.draw(|frame| {
             let area = frame.area();
@@ -636,7 +680,8 @@ pub fn run() -> io::Result<()> {
                     let center = rows / 2;
                     if center >= 2 && center + 2 < lines.len() {
                         let overlay = |line: &Line, text: &str, style: Style| -> Line {
-                            let existing: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                            let existing: String =
+                                line.spans.iter().map(|s| s.content.as_ref()).collect();
                             let text_chars: usize = text.chars().count();
                             let remaining: String = existing.chars().skip(text_chars).collect();
                             Line::from(vec![
@@ -647,26 +692,30 @@ pub fn run() -> io::Result<()> {
                         let white = Style::default().fg(Color::White);
                         lines[center - 2] = overlay(&lines[center - 2], "    TUISTEROIDS", white);
                         // center-1 left unchanged so braille background shows through
-                        lines[center] = overlay(&lines[center], "    Press any key to start", Style::default());
-                        lines[center + 1] = overlay(&lines[center + 1], "    Press Q to quit", Style::default());
+                        lines[center] = overlay(
+                            &lines[center],
+                            "    Press any key to start",
+                            Style::default(),
+                        );
+                        lines[center + 1] =
+                            overlay(&lines[center + 1], "    Press Q to quit", Style::default());
                     }
 
                     let paragraph = Paragraph::new(lines).block(Block::default());
                     frame.render_widget(paragraph, area);
                 }
                 GameState::GameOver => {
-                    let text = vec![
-                        Line::from(""),
-                        Line::from(""),
-                        Line::from(Span::styled(
-                            "    GAME OVER",
-                            Style::default().fg(Color::Red),
-                        )),
-                        Line::from(""),
-                        Line::from(format!("    Score: {}", game.final_score)),
-                        Line::from(""),
-                        Line::from("    Press any key to restart or Q to quit"),
-                    ];
+                    let text: Vec<Line> = game
+                        .game_over_lines()
+                        .into_iter()
+                        .map(|line| {
+                            if line == "    GAME OVER" {
+                                Line::from(Span::styled(line, Style::default().fg(Color::Red)))
+                            } else {
+                                Line::from(line)
+                            }
+                        })
+                        .collect();
                     let paragraph = Paragraph::new(text).block(Block::default());
                     frame.render_widget(paragraph, area);
                 }
@@ -1455,6 +1504,130 @@ mod tests {
         // Dead bullet should not destroy the asteroid
         assert_eq!(playing.asteroids.len(), 1);
         assert!(result.audio_events.is_empty());
+    }
+
+    // === Requirement: Game Over Leaderboard Reporting ===
+
+    // Scenario: Game over without a leaderboard client makes no report
+    #[test]
+    fn test_game_over_without_leaderboard() {
+        let mut game = Game::new(800.0, 600.0);
+        assert!(game.leaderboard.is_none());
+        game.state = GameState::Playing;
+        game.playing = Some(PlayingState::new_seeded(800.0, 600.0, 42));
+        game.playing.as_mut().unwrap().score = 77;
+        game.game_over();
+        assert!(game.leaderboard.is_none());
+        assert_eq!(game.final_score, 77);
+        assert_eq!(game.state, GameState::GameOver);
+    }
+
+    // Scenario: Game over with a leaderboard client submits the final score
+    #[test]
+    fn test_game_over_with_leaderboard_submits() {
+        use crate::leaderboard::test_stub::{http, stub, NO_CONTENT};
+        use crate::leaderboard::{Entry, LeaderboardClient, ReportState};
+        let body = "[{\"player\":\"alice\",\"score\":1234}]";
+        let (url, seen) = stub(vec![
+            Some(NO_CONTENT.to_string()),
+            Some(http("200 OK", body)),
+        ]);
+        let mut game = Game::new(800.0, 600.0);
+        let mut client = LeaderboardClient::new(&url, "alice");
+        client.timeout = Duration::from_millis(300);
+        game.leaderboard = Some(client);
+        game.state = GameState::Playing;
+        game.playing = Some(PlayingState::new_seeded(800.0, 600.0, 42));
+        game.playing.as_mut().unwrap().score = 1234;
+        game.game_over();
+        assert_eq!(game.state, GameState::GameOver);
+        assert_eq!(
+            game.leaderboard.as_ref().unwrap().state,
+            ReportState::Pending
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while game.leaderboard.as_ref().unwrap().state == ReportState::Pending {
+            assert!(Instant::now() < deadline, "report did not finish in time");
+            game.poll_leaderboard();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let seen = seen.lock().unwrap();
+        assert!(
+            seen[0].starts_with("POST /scores HTTP/1.1\r\n"),
+            "{}",
+            seen[0]
+        );
+        assert!(
+            seen[0].ends_with("{\"player\":\"alice\",\"score\":1234}"),
+            "{}",
+            seen[0]
+        );
+        assert_eq!(
+            game.leaderboard.as_ref().unwrap().state,
+            ReportState::Done(Ok(vec![Entry {
+                player: "alice".to_string(),
+                score: 1234.0,
+            }]))
+        );
+        assert!(game
+            .game_over_lines()
+            .contains(&"    Top scores:".to_string()));
+    }
+
+    // Scenario: Game-over screen is unchanged without a leaderboard
+    #[test]
+    fn test_game_over_lines_unchanged_without_leaderboard() {
+        let mut game = Game::new(800.0, 600.0);
+        game.state = GameState::GameOver;
+        game.final_score = 5000;
+        assert_eq!(
+            game.game_over_lines(),
+            vec![
+                "",
+                "",
+                "    GAME OVER",
+                "",
+                "    Score: 5000",
+                "",
+                "    Press any key to restart or Q to quit",
+            ]
+        );
+    }
+
+    // Scenario: Game-over screen includes leaderboard lines
+    #[test]
+    fn test_game_over_lines_with_leaderboard() {
+        use crate::leaderboard::{LeaderboardClient, ReportState, DEFAULT_URL};
+        let mut game = Game::new(800.0, 600.0);
+        let mut client = LeaderboardClient::new(DEFAULT_URL, "ian");
+        client.state = ReportState::Pending;
+        game.leaderboard = Some(client);
+        game.state = GameState::GameOver;
+        game.final_score = 10;
+        let lines = game.game_over_lines();
+        let score = lines.iter().position(|l| l == "    Score: 10").unwrap();
+        let lb = lines
+            .iter()
+            .position(|l| l == "    Leaderboard: fetching...")
+            .unwrap();
+        let prompt = lines
+            .iter()
+            .position(|l| l == "    Press any key to restart or Q to quit")
+            .unwrap();
+        assert!(score < lb && lb < prompt);
+        // An idle client contributes no lines.
+        game.leaderboard.as_mut().unwrap().state = ReportState::Idle;
+        assert_eq!(game.game_over_lines().len(), 7);
+    }
+
+    // Scenario: Polling the leaderboard without a client is a no-op
+    #[test]
+    fn test_poll_leaderboard_without_client() {
+        let mut game = Game::new(800.0, 600.0);
+        let started = Instant::now();
+        game.poll_leaderboard();
+        assert!(game.leaderboard.is_none());
+        assert!(started.elapsed() < Duration::from_millis(100));
     }
 
     // Scenario: Already-removed asteroid is skipped for subsequent bullets
