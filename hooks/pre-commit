@@ -20,7 +20,7 @@ echo "Tests: OK"
 
 echo ""
 echo "--- Checking code coverage (cargo tarpaulin) ---"
-COVERAGE_OUTPUT=$(cargo tarpaulin --lib --timeout 120 --skip-clean 2>&1)
+COVERAGE_OUTPUT=$(cargo tarpaulin --lib --engine llvm --timeout 120 --skip-clean 2>&1)
 echo "$COVERAGE_OUTPUT" | tail -5
 
 COVERAGE_PCT=$(echo "$COVERAGE_OUTPUT" | grep -oE '[0-9]+\.[0-9]+% coverage' | grep -oE '[0-9]+\.[0-9]+')

@@ -128,13 +128,27 @@ impl Asteroid {
 /// Generate a random irregular polygon shape for an asteroid.
 fn generate_shape<R: Rng>(radius: f64, num_vertices: usize, rng: &mut R) -> Vec<Vec2> {
     let angle_step = 2.0 * PI / num_vertices as f64;
-    (0..num_vertices)
-        .map(|i| {
-            let angle = i as f64 * angle_step;
-            let dist = radius * rng.gen_range(0.5..1.2);
-            Vec2::new(angle.cos() * dist, angle.sin() * dist)
-        })
-        .collect()
+    let mut shape = Vec::with_capacity(num_vertices);
+    for i in 0..num_vertices {
+        let angle = i as f64 * angle_step;
+        let dist = radius * rng.gen_range(0.5..1.2);
+        shape.push(Vec2::new(angle.cos() * dist, angle.sin() * dist));
+    }
+    shape
+}
+
+fn random_point<R: Rng>(world_width: f64, world_height: f64, rng: &mut R) -> Vec2 {
+    Vec2::new(
+        rng.gen_range(0.0..world_width),
+        rng.gen_range(0.0..world_height),
+    )
+}
+
+/// Distance between two points on a wrapping world.
+fn wrapped_distance(a: Vec2, b: Vec2, world_width: f64, world_height: f64) -> f64 {
+    let dx = (a.x - b.x).abs().min(world_width - (a.x - b.x).abs());
+    let dy = (a.y - b.y).abs().min(world_height - (a.y - b.y).abs());
+    (dx * dx + dy * dy).sqrt()
 }
 
 /// Wave system: determines how many large asteroids to spawn.
@@ -155,21 +169,10 @@ pub fn spawn_wave<R: Rng>(
     let mut asteroids = Vec::with_capacity(count as usize);
 
     for _ in 0..count {
-        let pos = loop {
-            let candidate = Vec2::new(
-                rng.gen_range(0.0..world_width),
-                rng.gen_range(0.0..world_height),
-            );
-            let dx = (candidate.x - ship_position.x)
-                .abs()
-                .min(world_width - (candidate.x - ship_position.x).abs());
-            let dy = (candidate.y - ship_position.y)
-                .abs()
-                .min(world_height - (candidate.y - ship_position.y).abs());
-            if (dx * dx + dy * dy).sqrt() >= min_distance {
-                break candidate;
-            }
-        };
+        let mut pos = random_point(world_width, world_height, rng);
+        while wrapped_distance(pos, ship_position, world_width, world_height) < min_distance {
+            pos = random_point(world_width, world_height, rng);
+        }
 
         let speed = rng.gen_range(20.0..80.0);
         let angle = rng.gen_range(0.0..(2.0 * PI));
