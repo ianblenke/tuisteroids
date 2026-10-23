@@ -2,6 +2,8 @@
 
 A classic Asteroids arcade game rendered entirely in the terminal using Unicode braille characters. Built in Rust with ratatui.
 
+![Tuisteroids gameplay](docs/gameplay.png)
+
 ## Features
 
 - Vector-style graphics using braille character rasterization
